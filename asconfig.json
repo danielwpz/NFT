@@ -1,0 +1,7 @@
+{
+  "extends": "near-sdk-as/asconfig.json",
+  "entry": "contracts/assemblyscript/nep4-basic/main.ts",
+  "options": {
+    "binaryFile": "out/main.wasm"
+  }
+} 

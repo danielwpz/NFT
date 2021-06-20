@@ -85,6 +85,10 @@ export function transfer(new_owner_id: string, token_id: TokenId): void {
 /* VIEW METHODS */
 /****************/
 
+export function name (): string {
+  return 'my nft'
+}
+
 // Returns `true` or `false` based on caller of the function (`predecessor`) having access to account_id's tokens
 export function check_access(account_id: string): boolean {
   const caller = context.predecessor
