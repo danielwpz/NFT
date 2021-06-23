@@ -15,6 +15,9 @@ export const MAX_SUPPLY = u64(10)
 // Let's set them to single characters to save storage space
 const tokenToOwner = new PersistentMap<TokenId, AccountId>('a')
 
+const tokenMinter = new PersistentMap<TokenId, AccountId>('minter')
+const tokenShares = new PersistentMap<TokenId, PersistentMap<AccountId, u64>>('shares')
+
 // Note that with this implementation, an account can only set one escrow at a
 // time. You could make values an array of AccountIds if you need to, but this
 // complicates the code and costs more in storage rent.
@@ -33,6 +36,7 @@ export const ERROR_CALLER_ID_DOES_NOT_MATCH_EXPECTATION = 'Caller ID does not ma
 export const ERROR_MAXIMUM_TOKEN_LIMIT_REACHED = 'Maximum token limit reached'
 export const ERROR_OWNER_ID_DOES_NOT_MATCH_EXPECTATION = 'Owner id does not match real token owner id'
 export const ERROR_TOKEN_NOT_OWNED_BY_CALLER = 'Token is not owned by the caller. Please use transfer_from for this scenario'
+export const ERROR_NOT_ENOUGH_SHARES = 'Not enough shares'
 
 /******************/
 /* CHANGE METHODS */
@@ -69,15 +73,21 @@ export function transfer_from(owner_id: string, new_owner_id: string, token_id: 
 // Requirements:
 // * The caller of the function (`predecessor`) should be the owner of the token. Callers who have
 // escrow access should use transfer_from.
-export function transfer(new_owner_id: string, token_id: TokenId): void {
+export function transfer(new_owner_id: string, token_id: TokenId, transfer_shares: u64): void {
   const predecessor = context.predecessor
 
   // fetch token owner and escrow; assert access
-  const owner = tokenToOwner.getSome(token_id)
-  assert(owner == predecessor, ERROR_TOKEN_NOT_OWNED_BY_CALLER)
+  const shares = tokenShares.getSome(token_id)
+  const ownedShares = shares.getSome(predecessor)
+  assert(ownedShares >= transfer_shares, ERROR_NOT_ENOUGH_SHARES)
 
   // assign new owner to token
-  tokenToOwner.set(token_id, new_owner_id)
+  shares.set(predecessor, ownedShares - transfer_shares)
+  let target_shares: u64 = u64(0)
+  if (shares.contains(new_owner_id)) {
+    target_shares = shares.getSome(new_owner_id)
+  }
+  shares.set(new_owner_id, target_shares + transfer_shares)
 }
 
 
@@ -107,8 +117,13 @@ export function check_access(account_id: string): boolean {
 }
 
 // Get an individual owner by given `tokenId`
-export function get_token_owner(token_id: TokenId): string {
-  return tokenToOwner.getSome(token_id)
+export function get_token_minter(token_id: TokenId): string {
+  return tokenMinter.getSome(token_id)
+}
+
+export function get_token_shares(token_id: TokenId, account_id: AccountId): u64 {
+  const shares = tokenShares.getSome(token_id)
+  return shares.getSome(account_id)
 }
 
 /********************/
@@ -117,7 +132,7 @@ export function get_token_owner(token_id: TokenId): string {
 
 // Note that ANYONE can call this function! You probably would not want to
 // implement a real NFT like this!
-export function mint_to(owner_id: AccountId): u64 {
+export function mint_to(owner_id: AccountId, token_total_supply: u64): u64 {
   // Fetch the next tokenId, using a simple indexing strategy that matches IDs
   // to current supply, defaulting the first token to ID=1
   //
@@ -130,7 +145,10 @@ export function mint_to(owner_id: AccountId): u64 {
   assert(tokenId <= MAX_SUPPLY, ERROR_MAXIMUM_TOKEN_LIMIT_REACHED)
 
   // assign ownership
-  tokenToOwner.set(tokenId, owner_id)
+  tokenMinter.set(tokenId, owner_id)
+  const shares = new PersistentMap<AccountId, u64>(`shares:${tokenId}`)
+  shares.set(owner_id, token_total_supply)
+  tokenShares.set(tokenId, shares)
 
   // increment and store the next tokenId
   storage.set<u64>(TOTAL_SUPPLY, tokenId + 1)
